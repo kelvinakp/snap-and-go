@@ -38,7 +38,7 @@ interface CartState {
 }
 
 export const useCartStore = create<CartState>((set) => ({
-  step: 'home',
+  step: 'camera',
   cartItems: [],
   lastReceipt: null,
   setStep: (step) => set({ step }),
@@ -69,5 +69,5 @@ export const useCartStore = create<CartState>((set) => ({
       cartItems: state.cartItems.filter((item) => item.id !== id),
     })),
   setReceipt: (receipt) => set({ lastReceipt: receipt }),
-  clearCart: () => set({ cartItems: [], step: 'home', lastReceipt: null }),
+  clearCart: () => set({ cartItems: [], step: 'camera', lastReceipt: null }),
 }));

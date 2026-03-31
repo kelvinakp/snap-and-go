@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "next dev --webpack",
     "dev:backend": "cd backend && .\\venv\\Scripts\\uvicorn main:app --reload --port 8000",
-    "dev:tunnel": "ngrok http 3000",
-    "dev:all": "concurrently -k -n front,back,tunnel -c cyan,yellow,magenta \"npm run dev\" \"npm run dev:backend\" \"npm run dev:tunnel\"",
+    "dev:tunnel": "cloudflared tunnel --url http://localhost:3000",
+    "dev:all": "concurrently -k -n front,back -c cyan,yellow \"npm run dev\" \"npm run dev:backend\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

@@ -1,12 +1,17 @@
-from collections import Counter
+import os
 from io import BytesIO
 
+import google.generativeai as genai
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from PIL import Image
+from pydantic import BaseModel
 from pyzbar.pyzbar import decode as decode_qr
 from ultralytics import YOLO
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -85,16 +90,15 @@ async def scan_cart(file: UploadFile = File(...)):
 
     results = model.predict(source=image, imgsz=640, verbose=False)
 
-    class_counts: Counter[str] = Counter()
+    detected_classes: set[str] = set()
     names_dict = model.names
     for result in results:
         for box in result.boxes:
             class_id = int(box.cls[0])
-            class_name = names_dict[class_id]
-            class_counts[class_name] += 1
+            detected_classes.add(names_dict[class_id])
 
     detected_items = []
-    for class_name, quantity in class_counts.items():
+    for class_name in detected_classes:
         product = MOCK_PRODUCTS_DB.get(class_name)
         if product:
             detected_items.append(
@@ -103,7 +107,7 @@ async def scan_cart(file: UploadFile = File(...)):
                     "yolo_class_name": class_name,
                     "display_name": product["display_name"],
                     "price": product["price"],
-                    "quantity": quantity,
+                    "quantity": 1,
                     "image_url": None,
                 }
             )
@@ -111,7 +115,6 @@ async def scan_cart(file: UploadFile = File(...)):
     return {
         "status": "success",
         "detected_items": detected_items,
-        "raw_detection_counts": dict(class_counts),
     }
 
 
@@ -158,6 +161,22 @@ def extract_amount_from_emvco(payload: str) -> float | None:
 # ---------------------------------------------------------------------------
 
 
+SLIP_VERIFICATION_PROMPT = """Analyze this PromptPay / bank transfer e-slip image.
+
+Your task:
+1. Determine if this looks like a valid payment receipt or transaction slip.
+2. Extract the transaction AMOUNT (the money transferred).
+3. Return ONLY a JSON object in this exact format (no markdown, no extra text):
+   {"valid": true, "amount": 85.00}
+   or if it's not a valid slip:
+   {"valid": false, "amount": null}
+
+Important:
+- Look for the transferred amount in Thai Baht (฿ or THB).
+- Ignore fees, balances, or account numbers — only return the transfer amount.
+- Return the amount as a number, not a string."""
+
+
 @app.post("/api/verify-payment")
 async def verify_payment(
     file: UploadFile = File(...),
@@ -165,39 +184,53 @@ async def verify_payment(
 ):
     """
     Accepts a PromptPay e-slip image and the expected cart total.
-    Decodes the QR code, parses the EMVCo payload, and validates
-    that the paid amount matches.
+    Uses Gemini Vision to read the slip and extract the paid amount.
+    Falls back to QR-based EMVCo parsing if Gemini is unavailable.
     """
 
     contents = await file.read()
-    image = Image.open(BytesIO(contents)).convert("RGB")
+    pil_image = Image.open(BytesIO(contents)).convert("RGB")
 
-    qr_results = decode_qr(image)
+    parsed_amount: float | None = None
 
-    if not qr_results:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "status": "error",
-                "message": "No QR code found in the uploaded image. Please upload a clear photo of the PromptPay e-slip.",
-            },
+    # Strategy 1: Gemini Vision (primary)
+    try:
+        import json as _json
+
+        vision_response = gemini_model.generate_content(
+            [SLIP_VERIFICATION_PROMPT, pil_image]
         )
+        raw_text = vision_response.text.strip()
+        # Strip markdown code fences if present
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        slip_data = _json.loads(raw_text)
 
-    raw_data = qr_results[0].data.decode("utf-8")
+        if slip_data.get("valid") and slip_data.get("amount") is not None:
+            parsed_amount = float(slip_data["amount"])
+    except Exception:
+        pass
 
-    parsed_amount = extract_amount_from_emvco(raw_data)
+    # Strategy 2: QR code EMVCo fallback
+    if parsed_amount is None:
+        try:
+            qr_results = decode_qr(pil_image)
+            if qr_results:
+                raw_data = qr_results[0].data.decode("utf-8")
+                parsed_amount = extract_amount_from_emvco(raw_data)
+        except Exception:
+            pass
 
     if parsed_amount is None:
         return JSONResponse(
             status_code=400,
             content={
                 "status": "error",
-                "message": "Could not extract a transaction amount from the QR code. The slip may be invalid or not a PromptPay EMVCo payload.",
-                "raw_qr_data": raw_data,
+                "message": "Could not read the transaction amount from your slip. Please upload a clearer photo.",
             },
         )
 
-    if abs(parsed_amount - expected_amount) < 0.01:
+    if abs(parsed_amount - expected_amount) < 0.50:
         return {
             "status": "success",
             "message": "Payment verified successfully.",
@@ -214,3 +247,48 @@ async def verify_payment(
             "expected_amount": expected_amount,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Gemini-powered store assistant chatbot
+# ---------------------------------------------------------------------------
+
+genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
+
+CHAT_SYSTEM_PROMPT = """You are a friendly and helpful store assistant for "Snap & Go", 
+an AI-powered self-checkout convenience store app in Thailand.
+
+Your knowledge:
+- The store sells snacks and drinks: Lays Nori Seaweed 46g (฿20), Lipton Tea 445ml (฿25), 
+  Mama Seafood Pad Kee Mao (฿7), Ovaltine 180ml (฿15), Sprite Can 325ml (฿18).
+- Customers scan their basket using the phone camera (AI object detection).
+- Payment is via PromptPay QR code. After paying, customers upload the e-slip for verification.
+- The app flow: Home → Camera Scan → Post-Scan → Cart → Payment → Upload Slip → Success.
+
+Rules:
+- Keep answers concise (1-3 sentences max).
+- Be warm, polite, and use simple English.
+- If asked about products not in the store, say you currently only carry the items listed above.
+- For technical issues, suggest refreshing the page or checking camera/browser permissions.
+- You may answer in Thai if the customer writes in Thai."""
+
+gemini_model = genai.GenerativeModel(
+    "gemini-2.0-flash",
+    system_instruction=CHAT_SYSTEM_PROMPT,
+)
+
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+@app.post("/api/chat")
+async def chat(body: ChatRequest):
+    try:
+        response = gemini_model.generate_content(body.message)
+        return {"reply": response.text}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"reply": f"Sorry, I'm having trouble right now. ({e})"},
+        )

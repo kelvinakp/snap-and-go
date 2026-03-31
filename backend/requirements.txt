@@ -4,3 +4,5 @@ python-multipart
 ultralytics
 pyzbar
 pillow
+google-generativeai
+python-dotenv
