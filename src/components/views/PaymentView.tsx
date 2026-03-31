@@ -1,10 +1,13 @@
 "use client";
 
 import { useCartStore } from "@/store/cartStore";
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Clock, RefreshCw, Upload, QrCode } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { Clock, RefreshCw, Upload } from "lucide-react";
+import generatePayload from "promptpay-qr";
+import { QRCodeSVG } from "qrcode.react";
 
 const TIMER_DURATION = 60;
+const STORE_PROMPTPAY_ID = "0628814077";
 
 export default function PaymentView() {
   const { cartItems, setStep } = useCartStore();
@@ -15,6 +18,11 @@ export default function PaymentView() {
   const totalAmount = cartItems.reduce(
     (sum, item) => sum + item.price * item.quantity,
     0
+  );
+
+  const qrPayload = useMemo(
+    () => generatePayload(STORE_PROMPTPAY_ID, { amount: totalAmount }),
+    [totalAmount]
   );
 
   const startTimer = useCallback(() => {
@@ -84,23 +92,34 @@ export default function PaymentView() {
           className="w-full bg-white rounded-2xl shadow-lg border border-gray-100 p-6 flex flex-col items-center animate-fade-in-up"
           style={{ animationDelay: "100ms" }}
         >
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-5">
             Scan with your banking app
           </p>
 
+          {/* QR code with high-contrast white background */}
           <div
-            className={`relative w-52 h-52 bg-gray-50 rounded-xl flex items-center justify-center border-2 border-dashed border-gray-200 transition-opacity duration-300 ${
-              expired ? "opacity-40" : "opacity-100"
+            className={`bg-white p-4 rounded-2xl shadow-sm border border-gray-100 transition-opacity duration-300 ${
+              expired ? "opacity-30" : "opacity-100"
             }`}
           >
-            {/* Placeholder QR pattern */}
-            <div className="flex flex-col items-center gap-3">
-              <QrCode className="w-24 h-24 text-gray-800" strokeWidth={1} />
-              <span className="text-[10px] text-gray-400 font-medium">
-                PromptPay QR
-              </span>
-            </div>
+            <QRCodeSVG
+              value={qrPayload}
+              size={220}
+              level="M"
+              bgColor="#ffffff"
+              fgColor="#1f2937"
+              includeMargin={false}
+            />
           </div>
+
+          {/* Amount badge below QR */}
+          {!expired && (
+            <div className="mt-4 bg-gray-50 px-4 py-2 rounded-xl">
+              <p className="text-sm font-bold text-gray-900 tabular-nums text-center">
+                ฿{totalAmount.toFixed(2)}
+              </p>
+            </div>
+          )}
 
           {/* Expired overlay */}
           {expired && (
@@ -119,8 +138,11 @@ export default function PaymentView() {
           )}
 
           {!expired && (
-            <p className="text-xs text-gray-400 mt-4 text-center">
-              Pay to <span className="font-semibold text-gray-600">Snap & Go Store</span>
+            <p className="text-xs text-gray-400 mt-3 text-center">
+              Pay to{" "}
+              <span className="font-semibold text-gray-600">
+                Snap & Go Store
+              </span>
             </p>
           )}
         </div>

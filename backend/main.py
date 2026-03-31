@@ -35,11 +35,30 @@ model = YOLO("best.pt")
 # ---------------------------------------------------------------------------
 
 MOCK_PRODUCTS_DB: dict[str, dict] = {
-    "singha_can": {"id": "uuid-1", "display_name": "Singha Beer Can", "price": 35.00},
-    "lays_green": {
-        "id": "uuid-2",
-        "display_name": "Lays (Sour Cream & Onion)",
+    "Lays Nori Seaweed 46g": {
+        "id": "uuid-1",
+        "display_name": "Lays Nori Seaweed 46g",
         "price": 20.00,
+    },
+    "Lipton Tea 445ml": {
+        "id": "uuid-2",
+        "display_name": "Lipton Tea 445ml",
+        "price": 25.00,
+    },
+    "Mama Seafood Pad Kee Mao": {
+        "id": "uuid-3",
+        "display_name": "Mama Seafood Pad Kee Mao",
+        "price": 7.00,
+    },
+    "Ovaltine 180ml": {
+        "id": "uuid-4",
+        "display_name": "Ovaltine 180ml",
+        "price": 15.00,
+    },
+    "Sprite Can 325ml": {
+        "id": "uuid-5",
+        "display_name": "Sprite Can 325ml",
+        "price": 18.00,
     },
 }
 
